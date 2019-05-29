@@ -65,7 +65,7 @@ for i in range(int(x/8)):
         dct_64 = matrix_select(dct,8)
         Image.fromarray(dct_64.clip(0, 255).astype('uint8')).save('lena_2ddct_8x8_64/lena_2ddct_%d_%d.png' % (i, j))
         idct = idct2d(dct_64)
-        idct_8x8_16[i*8:(i+1)*8, j*8:(j+1)*8] = idct
+        idct_8x8_64[i*8:(i+1)*8, j*8:(j+1)*8] = idct
 
 
 Image.fromarray(idct_8x8.clip(0, 255).astype('uint8')).save('lena_2ddct_8x8_2didct.png')
