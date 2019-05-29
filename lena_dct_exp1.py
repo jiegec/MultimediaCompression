@@ -41,7 +41,6 @@ def full_compress(side):
     Image.fromarray(idct_4.clip(0, 255).astype('uint8')).save('lena_2ddct_%d_2didct.png' % (side ** 2))
     mse = np.mean((data - idct_4) ** 2)
     psnr = 10 * np.log10(255.0 ** 2 / mse)
-    print('psnr 2ddct 1/%d:' % (side ** 2), psnr)
 
 full_compress(2) # 1/4
 full_compress(4) # 1/16
@@ -100,3 +99,24 @@ Image.fromarray(idct_8x8_64.clip(0, 255).astype('uint8')).save('lena_2ddct_8x8_6
 mse = np.mean((data - idct_8x8_64) ** 2)
 psnr = 10 * np.log10(255.0 ** 2 / mse)
 print('psnr 2ddct 8x8 1/64:', psnr)
+
+def dct1d_compress(ratio):
+    rows = fftpack.dct(data, norm='ortho')
+    # assuming data.shape[0] == data.shape[1]
+    rows = rows[0:x,0:(int(x/ratio))]
+    dct = fftpack.dct(rows.T, norm='ortho')
+    dct = dct[0:(int(x/ratio)),0:(int(x/ratio))].T
+
+    dct_full = np.zeros(data.shape)
+    dct_full[0:(int(x/ratio)),0:(int(x/ratio))] = dct
+    idct = idct2d(dct_full)
+    Image.fromarray(idct.clip(0, 255).astype('uint8')).save('lena_1ddct_%d.png' % ratio)
+
+    mse = np.mean((data - idct) ** 2)
+    psnr = 10 * np.log10(255.0 ** 2 / mse)
+    print('psnr 1ddct 1/%d:' % (ratio ** 2), psnr)
+    
+
+dct1d_compress(2)
+dct1d_compress(4)
+dct1d_compress(8)
