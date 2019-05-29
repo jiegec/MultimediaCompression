@@ -24,6 +24,18 @@
 
 第三个方法则是分割成 8x8 以后进行 DCT。
 
+相关代码：
+
+```python
+def dct2d(data):
+    return fftpack.dct(fftpack.dct(data, norm='ortho').T, norm='ortho').T
+
+def idct2d(data):
+    return fftpack.idct(fftpack.idct(data, norm='ortho').T, norm='ortho').T
+```
+
+
+
 第一个和第二个方法得到的DCT的图：
 
 ![](lena_2ddct.png)
@@ -42,7 +54,20 @@
 
 代码输出了对应的 PSNR 值。由于第一种方法和第二种方法在数学上是相等的，代码中只用了第一种方法进行计算，得到 PSNR 为 315.48 ，比第三种方法的 PSNR 315.45 略大，说明考虑到计算精度的时候，第一种方法比第三种方法能留下更精确的信息。
 
-接着对 DCT 之后的系数进行了“压缩”，题目要求 1/4 1/16 和 1/64 ，首先对 8\*8 的格子进行了 DCT 系数的选取，方法是，如果是 1/4 ，则在每个 2\*2 的子格子中选取左上角的那一个，其它依此类推。再用 IDCT 恢复到原来的图像，对比如下：
+接着对 DCT 之后的系数进行了“压缩”，题目要求 1/4 1/16 和 1/64 ，首先对 8\*8 的格子进行了 DCT 系数的选取，方法是，如果是 1/4 ，则选取左上角的 4*4，剩下为零，其它依此类推。再用 IDCT 恢复`到原来的图像，相关代码：
+
+```python
+def matrix_select(data, side):
+    x, y = data.shape
+    result = np.zeros(data.shape)
+    for i in range(int(x/side)):
+        for j in range(int(y/side)):
+            result[i,j] = data[i,j]
+    return result
+
+```
+
+对比如下：
 
 直接还原：
 
@@ -63,6 +88,23 @@
 可以看到，随着压缩率不断增加，图片清晰度也逐渐下降，但仍然保留了比较多原始的信息。由于分块是按照 8x8 的，所以最后 1/64 比例时，每个 8*8 的块都是同一个像素值，显示出了明显的颗粒感。
 
 直接对 2D DCT 进行类似的系数选取后，即对整个图片计算 2D DCT 后，保留左上角的一片系数，剩下都设置为 0，再 IDCT 恢复：
+
+```python
+# 1/side^2 coefs
+def full_compress(side):
+    idct_4 = np.zeros(data.shape)
+    dct_4 = matrix_select(dct,side)
+    idct_4 = idct2d(dct_4)
+    Image.fromarray(idct_4.clip(0, 255).astype('uint8')).save('lena_2ddct_%d_2didct.png' % (side ** 2))
+    mse = np.mean((data - idct_4) ** 2)
+    psnr = 10 * np.log10(255.0 ** 2 / mse)
+
+full_compress(2) # 1/4
+full_compress(4) # 1/16
+full_compress(8) # 1/64
+```
+
+
 
 原始图片：
 
@@ -104,3 +146,72 @@
 
 ## Exp2 Why quantization is so important?
 
+### 子任务 1 分块量化并计算平均 PSNR
+
+代码在 `lena_dct_exp2.py` 中。
+
+首先分块为 8x8 的小块，对每一块进行量化，代码如下：
+
+```python
+def quantize(matrix, data, a):
+    qq = a * matrix
+    return np.round(data / qq) * qq
+```
+
+按照矩阵中对应的值，近似到最近的倍数上，a是Q的系数。通过计算，得到平均的 PSNR 为 38.28 （a=1） 时
+
+### 子任务 2 根据不同的 a 得到 PSNR 曲线
+
+代码：
+
+```python
+for i in range(int(x/8)):
+    for j in range(int(y/8)):
+        submatrix = data[i*8:(i+1)*8, j*8:(j+1)*8]
+        dct = dct2d(submatrix)
+
+        for quan in range(1, 100):
+            idct_quan = idct2d(quantize(Q, dct, quan / 50.0))
+            psnr_8x8_quan[quan] += psnr(submatrix, idct_quan)
+```
+
+延续上面的思路，通过改变 a， 得到不同的 PSNR ，得到图如下：
+
+![](plot.png)
+
+可以看到，当 a 比较小的时候，此时量化矩阵的系数比较小，所以对原来的 DCT 系数矩阵的值的影响也比较小，所以大趋势是，随着a增大，PSNR减小，失真程度越高。有趣的是，在 a=0.10 和 a=0.20 出出现了两个小的尖峰，可能正好有一些数据在相邻的 a 值下量化到了同一个区间的两边，导致取值偏差较大。
+
+接下来，找了一张图，测试 Canon 和 Nikon 的量化矩阵：
+
+![](custom.png)
+
+首先灰度处理：
+
+![](custom_grayscale.png)
+
+接着按照类似的方法进行量化（代码在 `lena_dct_exp2_2.py` 中），得到：
+
+```
+psnr 2ddct 8x8 canon: 50.276670307604974
+psnr 2ddct 8x8 nikon: 50.78738331730147
+```
+
+可以看到对于这个图片， Nikon 比 Canon 会稍微好一些。
+
+对于量化矩阵的选取，可以看到它里面的数值有的大有的小，小则说明这个位置的 DCT 系数对视觉效果的影响比较大，反之说明影响比较小，量化以后可以得到比较高的压缩率，同时保证人眼看到的样子。所以左上角的数字一般比较小，右下角的数字一般比较大，这和 DCT 的意义是符合的。
+
+写了简单的随机，来获得一个对于上面这个图片 PSNR 比较高的 Q 矩阵：
+
+```
+psnr 2ddct 8x8 best: 50.805403292236115
+Q: [[ 1.  2.  1.  2.  3.  4.  6.  7.]
+ [ 1.  1.  2.  3.  3.  6.  7.  7.]
+ [ 2.  1.  2.  3.  4.  9.  8.  9.]
+ [ 1.  1.  2.  4.  7. 13.  9.  8.]
+ [ 3.  4.  6.  9.  9. 16. 13. 11.]
+ [ 3.  4.  6.  8.  9. 12. 14. 10.]
+ [ 7. 10. 11. 13. 14. 15. 15. 12.]
+ [11. 13. 11. 14. 15. 15. 14. 11.]]
+```
+
+其效果也不是很好，并且也只能说明对于当前的这个图片，这个量化矩阵比较适合，但是不能保证它的普遍性，即对于各种图片都有比较好的效果。
