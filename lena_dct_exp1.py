@@ -31,8 +31,21 @@ Image.fromarray(idct.clip(0, 255).astype('uint8')).save('lena_2ddct_2didct.png')
 
 mse = np.mean((data - idct) ** 2)
 psnr = 10 * np.log10(255.0 ** 2 / mse)
-print('idct img', idct)
 print('psnr 2ddct:', psnr)
+
+# 1/side^2 coefs
+def full_compress(side):
+    idct_4 = np.zeros(data.shape)
+    dct_4 = matrix_select(dct,side)
+    idct_4 = idct2d(dct_4)
+    Image.fromarray(idct_4.clip(0, 255).astype('uint8')).save('lena_2ddct_%d_2didct.png' % (side ** 2))
+    mse = np.mean((data - idct_4) ** 2)
+    psnr = 10 * np.log10(255.0 ** 2 / mse)
+    print('psnr 2ddct 1/%d:' % (side ** 2), psnr)
+
+full_compress(2) # 1/4
+full_compress(4) # 1/16
+full_compress(8) # 1/64
 
 x, y = data.shape
 idct_8x8 = np.zeros(data.shape)
@@ -71,23 +84,19 @@ for i in range(int(x/8)):
 Image.fromarray(idct_8x8.clip(0, 255).astype('uint8')).save('lena_2ddct_8x8_2didct.png')
 mse = np.mean((data - idct_8x8) ** 2)
 psnr = 10 * np.log10(255.0 ** 2 / mse)
-print('idct 8x8 img', idct_8x8)
 print('psnr 2ddct 8x8:', psnr)
 
 Image.fromarray(idct_8x8_4.clip(0, 255).astype('uint8')).save('lena_2ddct_8x8_4_2didct.png')
 mse = np.mean((data - idct_8x8_4) ** 2)
 psnr = 10 * np.log10(255.0 ** 2 / mse)
-print('idct 8x8 1/4 img', idct_8x8_4)
 print('psnr 2ddct 8x8 1/4:', psnr)
 
 Image.fromarray(idct_8x8_16.clip(0, 255).astype('uint8')).save('lena_2ddct_8x8_16_2didct.png')
 mse = np.mean((data - idct_8x8_16) ** 2)
 psnr = 10 * np.log10(255.0 ** 2 / mse)
-print('idct 8x8 1/16 img', idct_8x8_16)
 print('psnr 2ddct 8x8 1/16:', psnr)
 
 Image.fromarray(idct_8x8_64.clip(0, 255).astype('uint8')).save('lena_2ddct_8x8_64_2didct.png')
 mse = np.mean((data - idct_8x8_64) ** 2)
 psnr = 10 * np.log10(255.0 ** 2 / mse)
-print('idct 8x8 1/64 img', idct_8x8_64)
 print('psnr 2ddct 8x8 1/64:', psnr)
