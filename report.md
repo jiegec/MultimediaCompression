@@ -2,6 +2,8 @@
 
 陈嘉杰 2017011484
 
+代码采用 Python 编写，依赖 Pillow numpy matplotlib scipy opencv2 等库
+
 ## Exp1 Are they equivalent in effect?
 
 ### 子任务1 转换为灰度图片
