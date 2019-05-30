@@ -217,3 +217,152 @@ Q: [[ 1.  2.  1.  2.  3.  4.  6.  7.]
 ```
 
 其效果也不是很好，并且也只能说明对于当前的这个图片，这个量化矩阵比较适合，但是不能保证它的普遍性，即对于各种图片都有比较好的效果。
+
+## Exp3 Intuitive interpretation of ME
+
+### 子任务 1 选择 16*16 块并进行运动估计
+
+代码在 `cars.py` 和 `cars_pixel.py` 中，前者负责把视频拆分成多个图片，后者负责追踪。
+
+这次实验进行了两个物体的追踪，分别是白色的小轿车和白色的大巴车，它们的位置和出现的帧是手动标记的：
+
+```python
+# white car in the middle
+if sys.argv[1] == 'car':
+    x = 166
+    y = 181
+    begin = 1
+    end = 50
+
+# bus in the right
+else:
+    x = 125
+    y = 333
+    begin = 10
+    end = 170
+```
+
+接着就是在当前的 16\*16 方块附近找到 MSE 最小的 16\*16 方块：
+
+```python
+for hh in range(0, h-16):
+  for ww in range(0, w-16):
+    if hh >= x - radius and hh <= x + radius and ww >= y - radius and ww <= y + radius:
+      subimage = transformer(new_data[hh:(hh+16),ww:(ww+16)])
+      #mse = np.mean((subimage - target_block)**2) + np.mean((subimage - orig_target_block) ** 2)
+      mse = np.mean((subimage - target_block)**2)
+      if mse < min_mse:
+        min_mse = mse
+        min_mse_hh = hh
+        min_mse_ww = ww
+```
+
+这里做过两种尝试：一种是直接和当前的块进行 MSE 的计算，一种是考虑了当前块和最初块的 MSE 求和。这里的 `transformer` 表示在求 MSE 前对块执行的预操作，如果是直接匹配像素，就是不变（identity）；如果是在 DCT 域上进行匹配，就是先运行一次 2D DCT，效果如下（修改代码中的 transformer 并运行 `python3 cars_pixel.py car`）：
+
+小车 MV 和 MSE：
+
+![](mv_car_identity.png)
+
+![](mse_car_identity.png)
+
+可以看到，在中间的时候，因为路上的白色和小车的白色一样，所以跟踪丢失了小车，到了附近的路上，之后就没有怎么变化了，所以 MSE 很小。如果按照上面所说的，把当前块和上一个块的MSE与当前块和初始块的MSE求和，就可以规避这个问题。
+
+在 DCT 域上匹配效果：
+
+![](mv_car_dct2d.png)
+
+![](mse_car_dct2d.png)
+
+可以看到，在 DCT 匹配的时候，虽然路上也有白色，但是 DCT 的匹配能够抵抗住这种干扰，得到正确的跟踪效果（下面是个动图，路径为 car_detect/track_car_dct2d.gif）：
+
+![](car_detect/track_car_dct2d.gif)
+
+接着，对大巴进行类似的实验，效果比小车更加好，因为少了一些干扰：
+
+像素匹配：
+
+![](mv_bus_identity.png)
+
+![](mse_bus_identity.png)
+
+DCT 匹配：
+
+![](mv_bus_dct2d.png)
+
+![](mse_bus_dct2d.png)
+
+可以看到，最后大巴离开视频范围内的时候，MSE有一个明显的下降，也是符合预期的。因为大巴外形上的重复性，直接用像素匹配的话可以看到跟踪的时候会前后移动（car_detect/track_bus_identity.gif）：
+
+![](car_detect/track_bus_identity.gif)
+
+相比之下 DCT 上的匹配时这个问题没有这么显著，但是也有新的“漂移”的问题（car_detect/track_bus_dct2d.gif）：
+
+![](car_detect/track_bus_dct2d.gif)
+
+从性能上来看，当前的做法是对邻近的16*16的方块都进行 MSE 的计算，DCT则是分别计算2D DCT后计算 MSE，速度自然是前者比后者要快，毕竟少了一部计算。但是，实际在获取到图片的时候，可能能很容易得到图片中每一块的DCT（比如图片里可能就是存着每一块的DCT矩阵，显示的时候IDCT还原出来），如果可以复用这些 DCT 的结果，可能计算 DCT 的 MSE 会更好，但此时的 DCT 矩阵在图里的位置可能不会是连续的，这个时候移动跟踪的粒度就会比较粗（在上面的代码中，是逐个像素偏移来计算的）。
+
+### 子任务 2 选取部分系数/像素进行运动估计
+
+按照已有的代码框架，只要继续改 `transformer` 函数即可。试验了以下的函数：
+
+```python
+def select(data):
+    return data.digonal()
+```
+
+类似于 Exp1 中的思路，我只取一部分点，由于目前还是像素域的匹配，不能匹配过于集中，所以选择了主对角线上的点，效果如图：
+
+![](mv_bus_select.png)
+
+可以看到，匹配到了比较长的距离，但是在中途还是跟丢了，这就是性能和效果之间的取舍问题。如果把两条对角线都跟踪上：
+
+```python
+def select2(data):
+    return np.concatenate((data.diagonal(), data.T.diagonal().T))
+```
+
+可以看到就没有出现刚才的问题：
+
+![](mv_bus_select2.png)
+
+如果在 DCT 上也做类似的事情，这次是保留左上角的分量：
+
+```python
+def dct2d_select(data):
+    return dct2d(data)[0:8, 0:8]
+```
+
+也得到了很好的跟踪效果：
+
+![](mv_bus_dct2d_select.png)
+
+如果继续减少使用的系数：
+
+```python
+def dct2d_select2(data):
+    return dct2d(data)[0:2, 0:2]
+```
+
+这个时候就会看到很大的不稳定性：
+
+![](mv_bus_dct2d_select2.png)
+
+虽然路径是对的，但是中间其实很多时候跟踪到路上去了，虽然取了 DCT 中高频的分量，但还是丢失了很多细节。
+
+接下来我又继续尝试了提取边缘特征，采用的是 Harris Corner Detection 算法，对应的函数：
+
+```python
+def corner(data):
+    gray = cv2.cvtColor(data, cv2.COLOR_BGR2GRAY)
+    return cv2.cornerHarris(gray, 2, 3, 0.04)
+```
+
+也得到了比较不错的效果：
+
+![](mv_bus_corner.png)
+
+并且从动态图中可以看到确实一直在跟踪巴士的上边沿：
+
+![](car_detect/track_bus_corner.gif)
+
+当然了，这一步额外的边缘计算，需要额外的时间，对于一些目标来说是比较合适的，例如这里的巴士，但不知道对于更多复杂的图形来说会不会也有比较好的效果。
